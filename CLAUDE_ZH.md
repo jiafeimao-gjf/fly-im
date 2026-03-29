@@ -43,6 +43,13 @@ npm run build  # 生产构建
 - `POST /api/users/{user_id}/contacts` - 通过用户名添加好友
 - `GET /api/messages/{user_id}?with={contact_id}` - 获取聊天记录（通过 `before` 参数分页）
 
+**管理员 API 端点** (需 admin token):
+- `POST /api/admin/login` - 管理员登录（username + password → admin JWT）
+- `GET /api/admin/stats` - 系统统计：用户数、房间数、消息数、好友数、在线用户数
+- `GET /api/admin/users?limit=50&offset=0` - 用户列表（分页）
+- `GET /api/admin/rooms?limit=50&offset=0` - 聊天室列表（含成员数，分页）
+- `GET /api/admin/messages/recent?limit=50` - 最近消息（私聊+聊天室）
+
 **WebSocket (`/ws`)**: 客户端先发送认证 token，然后交换消息。消息类型: `auth`, `auth_ack`, `message`, `ack`, `typing`, `read`, `presence`, `ping`, `pong`。
 
 **连接管理器** (`connection.py`): `active_connections` 为 `dict[user_id, list[WebSocket]]` — 支持多 Tab，每个用户的多个 Tab 分别存储。`send_personal()` 向所有 Tab 投递消息。`disconnect(user_id, websocket)` 只移除指定 Tab 的连接。
@@ -56,10 +63,21 @@ npm run build  # 生产构建
 **导航**: 底部 Tab 栏式导航（Chats / Contacts / Rooms）。聊天页面 (`/chat/:userId`, `/room/:roomId`) 为全屏，Tab 栏隐藏。
 
 **路由结构**:
-- `/login`, `/register` — 认证页面
+- `/login`, `/register` — 用户认证页面
 - `/` (main 路由) — 底部 Tab 栏壳，children: `chats`, `contacts`, `rooms`
 - `/chat/:userId` — 全屏 1-on-1 聊天
 - `/room/:roomId` — 全屏聊天室聊天
+- `/admin/login` — 管理员登录页
+- `/admin` — 管理员仪表盘（受保护，与用户 app 独立会话）
+
+**管理员界面** (`src/pages/admin/`):
+- `AdminLoginPage.vue` — 管理员凭证登录
+- `AdminDashboardPage.vue` — 仪表盘，含统计卡片和用户/房间/消息 Tab 页
+- `AdminUsersPage.vue` — 分页用户列表
+- `AdminRoomsPage.vue` — 分页聊天室列表（含成员数）
+- `AdminMessagesPage.vue` — 最近消息表格
+- `src/stores/admin.ts` — 管理员会话（localStorage 中的 `fly_admin_token`）
+- `src/services/adminApi.ts` — 管理员 API Axios 客户端
 
 **状态管理**:
 - `useAuthStore`: 用户会话，localStorage 中的 JWT token，login/register/logout。`logout()` 同时断开 WebSocket。

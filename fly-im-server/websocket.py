@@ -141,7 +141,7 @@ async def websocket_endpoint(websocket: WebSocket):
             elif msg.type == "typing":
                 # Send typing indicator to recipient
                 if msg.to in manager.active_connections:
-                    await manager.active_connections[msg.to].send_json({
+                    await manager.send_personal(msg.to, {
                         "type": "typing",
                         "from": user_id,
                         "to": msg.to,

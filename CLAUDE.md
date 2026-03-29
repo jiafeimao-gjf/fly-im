@@ -43,6 +43,13 @@ npm run build  # Production build
 - `POST /api/users/{user_id}/contacts` - Add contact by username
 - `GET /api/messages/{user_id}?with={contact_id}` - Get message history (pagination via `before` param)
 
+**Admin API Endpoints** (requires admin token):
+- `POST /api/admin/login` - Admin login (username + password → admin JWT)
+- `GET /api/admin/stats` - System stats: users, rooms, messages, contacts, room_members, online_users
+- `GET /api/admin/users?limit=50&offset=0` - Paginated user list
+- `GET /api/admin/rooms?limit=50&offset=0` - Paginated room list with member counts
+- `GET /api/admin/messages/recent?limit=50` - Recent messages (private + room)
+
 **WebSocket (`/ws`)**: Client sends auth token first, then exchanges messages. Message types: `auth`, `auth_ack`, `message`, `ack`, `typing`, `read`, `presence`, `ping`, `pong`.
 
 **Connection Manager** (`connection.py`): `active_connections` is `dict[user_id, list[WebSocket]]` — supports multi-tab by storing all tabs per user. `send_personal()` delivers messages to all tabs. `disconnect(user_id, websocket)` removes only the specified tab's connection.
@@ -56,10 +63,21 @@ npm run build  # Production build
 **Navigation**: Tab-based with bottom tab bar (Chats / Contacts / Rooms). Chat pages (`/chat/:userId`, `/room/:roomId`) are full-screen with tab bar hidden.
 
 **Route Structure**:
-- `/login`, `/register` — Auth pages
+- `/login`, `/register` — User auth pages
 - `/` (main route) — Shell with bottom tab bar, children: `chats`, `contacts`, `rooms`
 - `/chat/:userId` — Full-screen 1-on-1 chat
 - `/room/:roomId` — Full-screen room chat
+- `/admin/login` — Admin login page
+- `/admin` — Admin dashboard (protected, separate session from user app)
+
+**Admin Interface** (`src/pages/admin/`):
+- `AdminLoginPage.vue` — Admin credential login
+- `AdminDashboardPage.vue` — Dashboard with stats, tabbed panels for users/rooms/messages
+- `AdminUsersPage.vue` — Paginated user list
+- `AdminRoomsPage.vue` — Paginated room list with member counts
+- `AdminMessagesPage.vue` — Recent messages table
+- `src/stores/admin.ts` — Admin session (`fly_admin_token` in localStorage)
+- `src/services/adminApi.ts` — Axios client for admin API endpoints
 
 **State Management**:
 - `useAuthStore`: User session, JWT token in localStorage, login/register/logout. `logout()` also disconnects the WebSocket.

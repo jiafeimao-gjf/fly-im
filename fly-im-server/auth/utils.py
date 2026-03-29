@@ -32,3 +32,22 @@ def decode_token(token: str) -> Optional[str]:
         return payload.get("sub")
     except JWTError:
         return None
+
+
+def create_admin_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+    """Create a token for admin using the admin secret key."""
+    to_encode = data.copy()
+    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=config.ACCESS_TOKEN_EXPIRE_MINUTES))
+    to_encode.update({"exp": expire, "is_admin": True})
+    return jwt.encode(to_encode, config.ADMIN_SECRET_KEY, algorithm=config.ALGORITHM)
+
+
+def decode_admin_token(token: str) -> Optional[str]:
+    """Decode an admin token. Returns user_id if valid, None if invalid."""
+    try:
+        payload = jwt.decode(token, config.ADMIN_SECRET_KEY, algorithms=[config.ALGORITHM])
+        if not payload.get("is_admin"):
+            return None
+        return payload.get("sub")
+    except JWTError:
+        return None

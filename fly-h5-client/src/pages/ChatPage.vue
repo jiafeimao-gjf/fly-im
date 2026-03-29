@@ -129,7 +129,7 @@ async function handleSend() {
   const id = crypto.randomUUID()
   chatStore.addMessage({
     id,
-    from_user_id: authStore.user.id,
+    from_user_id: authStore.user!.id,
     to_user_id: contact.value.id,
     content: messageText.value,
     timestamp: Date.now(),

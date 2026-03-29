@@ -38,6 +38,7 @@ export interface WSMessage {
   ok?: boolean
   error?: string
   userId?: string
+  online?: boolean
   metadata?: Record<string, unknown>
 }
 

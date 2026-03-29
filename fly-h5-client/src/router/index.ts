@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { useAdminStore } from '@/stores/admin'
 
 const routes = [
   {
@@ -47,6 +48,18 @@ const routes = [
     component: () => import('@/pages/RoomChatPage.vue'),
     meta: { requiresAuth: true, fullScreen: true },
   },
+  // Admin routes
+  {
+    path: '/admin/login',
+    name: 'admin-login',
+    component: () => import('@/pages/admin/AdminLoginPage.vue'),
+  },
+  {
+    path: '/admin',
+    name: 'admin',
+    component: () => import('@/pages/admin/AdminDashboardPage.vue'),
+    meta: { requiresAdminAuth: true },
+  },
 ]
 
 const router = createRouter({
@@ -56,9 +69,12 @@ const router = createRouter({
 
 router.beforeEach((to, _from, next) => {
   const authStore = useAuthStore()
+  const adminStore = useAdminStore()
   authStore.initFromStorage()
 
-  if (to.meta.requiresAuth && !authStore.isLoggedIn) {
+  if (to.meta.requiresAdminAuth && !adminStore.isLoggedIn) {
+    next({ name: 'admin-login' })
+  } else if (to.meta.requiresAuth && !authStore.isLoggedIn) {
     next({ name: 'login' })
   } else if ((to.name === 'login' || to.name === 'register') && authStore.isLoggedIn) {
     next({ name: 'chats' })

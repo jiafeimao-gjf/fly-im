@@ -218,7 +218,7 @@ async function handleSend() {
   const id = crypto.randomUUID()
   chatStore.addRoomMessage({
     id,
-    from_user_id: authStore.user.id,
+    from_user_id: authStore.user!.id,
     room_id: roomId.value,
     content: messageText.value,
     timestamp: Date.now(),
@@ -290,14 +290,14 @@ onMounted(async () => {
         scrollToBottom()
       }
     },
-    onRoomMemberJoined: (rid: string, userId: string) => {
+    onRoomMemberJoined: (rid: string, _userId: string) => {
       if (rid === roomId.value) {
         chatStore.loadRoomMembers(rid)
       }
     },
-    onRoomMemberLeft: (rid: string, userId: string) => {
+    onRoomMemberLeft: (rid: string, _userId: string) => {
       if (rid === roomId.value) {
-        chatStore.updateRoomMemberPresence(rid, userId, false)
+        chatStore.updateRoomMemberPresence(rid, _userId, false)
       }
     },
     onAck: (messageId: string) => {

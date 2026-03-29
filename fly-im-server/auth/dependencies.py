@@ -4,7 +4,7 @@ from fastapi import Depends, HTTPException, Header
 from sqlalchemy.orm import Session
 
 from database import SessionLocal
-from .utils import decode_token
+from .utils import decode_token, decode_admin_token
 
 
 def get_db() -> Generator[Session, None, None]:
@@ -24,4 +24,15 @@ def get_current_user_id(authorization: str = Header(None)) -> str:
     user_id = decode_token(token)
     if not user_id:
         raise HTTPException(status_code=401, detail="Invalid token")
+    return user_id
+
+
+def get_admin_user_id(authorization: str = Header(None)) -> str:
+    """Extract and validate admin user_id from Authorization header"""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Invalid authorization header")
+    token = authorization[7:]
+    user_id = decode_admin_token(token)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid or non-admin token")
     return user_id
