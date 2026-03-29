@@ -8,7 +8,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from auth import decode_token
 from database import SessionLocal
-from models import User, Message, RoomMember
+from models import User, Message, RoomMember, Contact
 from schemas import WSMessage
 from connection import manager
 import config
@@ -72,6 +72,18 @@ async def websocket_endpoint(websocket: WebSocket):
         # Store connection (now appends for multi-tab support)
         await manager.connect(user_id, websocket)
 
+        # Push contact online statuses to newly connected user
+        db = SessionLocal()
+        contacts = db.query(Contact).filter(Contact.user_id == user_id).all()
+        for contact in contacts:
+            online = contact.contact_id in manager.active_connections
+            await websocket.send_json({
+                "type": "presence",
+                "userId": contact.contact_id,
+                "online": online
+            })
+        db.close()
+
         # Start ping task with timeout tracking
         pong_received = True  # True = expect pong, False = waiting
 
@@ -106,6 +118,10 @@ async def websocket_endpoint(websocket: WebSocket):
             if msg.type == "pong":
                 # Heartbeat response - mark received
                 pong_received = True
+
+            elif msg.type == "ping":
+                # Client heartbeat request - respond with pong
+                await websocket.send_json({"type": "pong"})
 
             elif msg.type == "message":
                 # Send message to recipient
