@@ -26,6 +26,8 @@ class ConnectionManager:
         if user_id not in self.active_connections:
             return
 
+        was_single_connection = len(self.active_connections[user_id]) == 1
+
         if websocket is not None:
             # Remove specific websocket (multi-tab support)
             self.active_connections[user_id] = [
@@ -37,13 +39,14 @@ class ConnectionManager:
             # Remove all connections for user
             del self.active_connections[user_id]
 
-        # Leave all rooms
-        if user_id in self.user_rooms:
-            for room_id in list(self.user_rooms[user_id]):
-                await self.leave_room(user_id, room_id)
-            # leave_room already cleans up user_rooms entry when set is empty
-
-        await self.broadcast_presence(user_id, False)
+        # Only broadcast offline and leave rooms if this was the last connection
+        if was_single_connection:
+            # Leave all rooms
+            if user_id in self.user_rooms:
+                for room_id in list(self.user_rooms[user_id]):
+                    await self.leave_room(user_id, room_id)
+                # leave_room already cleans up user_rooms entry when set is empty
+            await self.broadcast_presence(user_id, False)
 
     async def broadcast_presence(self, user_id: str, online: bool):
         """Broadcast presence change to all connected users who have this user as a contact."""
