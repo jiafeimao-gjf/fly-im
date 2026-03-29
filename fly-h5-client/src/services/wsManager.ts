@@ -34,15 +34,24 @@ class WsManager {
   private heartbeatTimer: number | null = null
   private shouldReconnect = true
   private pendingQueue: object[] = []
+  private reconnectTimer: number | null = null
 
   connect(options: WsManagerOptions): void {
+    // If already open, do nothing
     if (this.ws?.readyState === WebSocket.OPEN) return
+
+    // If token changed while connecting, force reconnect with new credentials
     if (this.options?.token !== options.token) {
-      // Token changed, force reconnect with new credentials
       this.disconnect(false)
     }
-    this.options = options
 
+    // Cancel any pending reconnect
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+
+    this.options = options
     this.setStatus('connecting')
     this.shouldReconnect = true
 
@@ -59,8 +68,8 @@ class WsManager {
     if (!this.ws) return
 
     this.ws.onopen = () => {
-      this.flushQueue()
       this.send({ type: 'auth', token: this.options!.token })
+      this.flushQueue()
     }
 
     this.ws.onclose = () => {
@@ -170,6 +179,8 @@ class WsManager {
   }
 
   private scheduleReconnect(): void {
+    if (this.reconnectTimer !== null) return // Already scheduled
+
     if (this.reconnectAttempts >= (this.options?.maxReconnectAttempts || 10)) {
       this.setStatus('disconnected')
       return
@@ -183,8 +194,11 @@ class WsManager {
       30000
     )
 
-    setTimeout(() => {
-      if (this.options) this.connect(this.options)
+    this.reconnectTimer = window.setTimeout(() => {
+      this.reconnectTimer = null
+      if (this.shouldReconnect && this.options) {
+        this.connect(this.options)
+      }
     }, delay)
   }
 
@@ -224,7 +238,14 @@ class WsManager {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(message))
     } else {
+      // Queue message for when connection is restored
       this.pendingQueue.push(message)
+      // Trigger reconnect if not already connecting/reconnecting and we have options
+      if (this.options && this.status !== 'connecting' && this.status !== 'reconnecting') {
+        this.shouldReconnect = true
+        this.reconnectAttempts = 0
+        this.connect(this.options)
+      }
     }
   }
 
@@ -240,23 +261,35 @@ class WsManager {
   }
 
   sendMessage(to: string, content: string, id?: string): void {
-    this.send({
+    const msg = {
       type: 'message',
       id: id || crypto.randomUUID(),
       to,
       content,
       timestamp: Date.now(),
-    })
+    }
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(msg))
+    } else {
+      this.pendingQueue.push(msg)
+      this.triggerReconnectIfNeeded()
+    }
   }
 
   sendRoomMessage(roomId: string, content: string, id?: string): void {
-    this.send({
+    const msg = {
       type: 'room_message',
       id: id || crypto.randomUUID(),
       room_id: roomId,
       content,
       timestamp: Date.now(),
-    })
+    }
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(msg))
+    } else {
+      this.pendingQueue.push(msg)
+      this.triggerReconnectIfNeeded()
+    }
   }
 
   sendTyping(to: string, roomId?: string): void {
@@ -287,6 +320,14 @@ class WsManager {
 
   getStatus(): WsStatus {
     return this.status
+  }
+
+  private triggerReconnectIfNeeded(): void {
+    if (this.options && this.status !== 'connecting' && this.status !== 'reconnecting') {
+      this.shouldReconnect = true
+      this.reconnectAttempts = 0
+      this.connect(this.options)
+    }
   }
 }
 

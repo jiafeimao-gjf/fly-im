@@ -41,7 +41,7 @@ class ConnectionManager:
         if user_id in self.user_rooms:
             for room_id in list(self.user_rooms[user_id]):
                 await self.leave_room(user_id, room_id)
-            del self.user_rooms[user_id]
+            # leave_room already cleans up user_rooms entry when set is empty
 
         await self.broadcast_presence(user_id, False)
 
