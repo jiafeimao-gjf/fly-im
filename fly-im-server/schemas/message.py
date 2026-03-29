@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 class MessageResponse(BaseModel):
     id: str
     from_user_id: str
-    to_user_id: str
+    to_user_id: Optional[str]
     content: str
     timestamp: int
     delivered_at: Optional[int]

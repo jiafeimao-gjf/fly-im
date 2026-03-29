@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from database import init_db
 from connection import manager
-from routes import auth_router, users_router, messages_router, rooms_router
+from routes import auth_router, users_router, messages_router, rooms_router, admin_router
 from websocket import router as ws_router
 
 # Initialize database
@@ -31,6 +31,7 @@ app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(messages_router)
 app.include_router(rooms_router)
+app.include_router(admin_router)
 app.include_router(ws_router)
 
 

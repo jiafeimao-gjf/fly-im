@@ -69,9 +69,8 @@ async def websocket_endpoint(websocket: WebSocket):
             "userId": user_id
         })
 
-        # Store connection
-        manager.active_connections[user_id] = websocket
-        await manager.broadcast_presence(user_id, True)
+        # Store connection (now appends for multi-tab support)
+        await manager.connect(user_id, websocket)
 
         # Start ping task
         async def ping_loop():
@@ -111,9 +110,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 db.commit()
                 db.close()
 
-                # Send to recipient if online
+                # Send to recipient if online (handles multi-tab: delivers to all tabs)
                 if msg.to in manager.active_connections:
-                    await manager.active_connections[msg.to].send_json({
+                    await manager.send_personal(msg.to, {
                         "type": "message",
                         "id": msg_id,
                         "from": user_id,
@@ -190,15 +189,19 @@ async def websocket_endpoint(websocket: WebSocket):
                 db.commit()
                 db.close()
 
-                # Broadcast to room members
-                await manager.broadcast_to_room(msg.room_id, {
+                # Broadcast to ALL room members from database (not just WebSocket-joined ones)
+                room_members = db.query(RoomMember).filter(RoomMember.room_id == msg.room_id).all()
+                broadcast_msg = {
                     "type": "room_message",
                     "id": msg_id,
                     "from": user_id,
                     "room_id": msg.room_id,
                     "content": msg.content,
                     "timestamp": timestamp,
-                }, exclude_user=user_id)
+                }
+                for member in room_members:
+                    if member.user_id != user_id and member.user_id in manager.active_connections:
+                        await manager.active_connections[member.user_id].send_json(broadcast_msg)
 
                 # Send ack to sender
                 await websocket.send_json({
@@ -257,4 +260,4 @@ async def websocket_endpoint(websocket: WebSocket):
         if ping_task:
             ping_task.cancel()
         if user_id:
-            manager.disconnect(user_id)
+            manager.disconnect(user_id, websocket)

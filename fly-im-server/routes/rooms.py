@@ -72,7 +72,7 @@ def get_room_members(room_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{room_id}/members")
-def add_room_member(room_id: str, contact: ContactAdd, db: Session = Depends(get_db), user_id: str = Depends(get_current_user_id)):
+async def add_room_member(room_id: str, contact: ContactAdd, db: Session = Depends(get_db), user_id: str = Depends(get_current_user_id)):
     """Add a member to room (owner/admin only)"""
     # Check permission
     membership = db.query(RoomMember).filter(
@@ -109,7 +109,7 @@ def add_room_member(room_id: str, contact: ContactAdd, db: Session = Depends(get
 
 
 @router.delete("/{room_id}/members/{target_user_id}")
-def remove_room_member(room_id: str, target_user_id: str, db: Session = Depends(get_db), user_id: str = Depends(get_current_user_id)):
+async def remove_room_member(room_id: str, target_user_id: str, db: Session = Depends(get_db), user_id: str = Depends(get_current_user_id)):
     """Remove a member from room (owner/admin only)"""
     # Check permission
     membership = db.query(RoomMember).filter(
@@ -144,7 +144,7 @@ def remove_room_member(room_id: str, target_user_id: str, db: Session = Depends(
 
 
 @router.delete("/{room_id}")
-def delete_room(room_id: str, db: Session = Depends(get_db), user_id: str = Depends(get_current_user_id)):
+async def delete_room(room_id: str, db: Session = Depends(get_db), user_id: str = Depends(get_current_user_id)):
     """Delete a room (owner only)"""
     room = db.query(Room).filter(Room.id == room_id).first()
     if not room:

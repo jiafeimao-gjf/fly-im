@@ -5,8 +5,8 @@ from fastapi import WebSocket
 
 class ConnectionManager:
     def __init__(self):
-        # user_id -> WebSocket
-        self.active_connections: dict[str, WebSocket] = {}
+        # user_id -> list of WebSockets (supports multi-tab)
+        self.active_connections: dict[str, list[WebSocket]] = {}
         # room_id -> set of user_ids
         self.room_members: dict[str, set[str]] = {}
         # user_id -> set of room_ids (inverse index)
@@ -14,38 +14,62 @@ class ConnectionManager:
 
     async def connect(self, user_id: str, websocket: WebSocket):
         await websocket.accept()
-        self.active_connections[user_id] = websocket
+        if user_id not in self.active_connections:
+            self.active_connections[user_id] = []
+        # Avoid duplicate tabs
+        if websocket not in self.active_connections[user_id]:
+            self.active_connections[user_id].append(websocket)
         await self.broadcast_presence(user_id, True)
 
-    def disconnect(self, user_id: str):
-        if user_id in self.active_connections:
+    def disconnect(self, user_id: str, websocket: WebSocket = None):
+        """Remove websocket(s) for user. If websocket specified, remove only that one (multi-tab)."""
+        if user_id not in self.active_connections:
+            return
+
+        if websocket is not None:
+            # Remove specific websocket (multi-tab support)
+            self.active_connections[user_id] = [
+                ws for ws in self.active_connections[user_id] if ws is not websocket
+            ]
+            if not self.active_connections[user_id]:
+                del self.active_connections[user_id]
+        else:
+            # Remove all connections for user
             del self.active_connections[user_id]
+
         # Leave all rooms
         if user_id in self.user_rooms:
             for room_id in list(self.user_rooms[user_id]):
                 asyncio.create_task(self.leave_room(user_id, room_id))
             del self.user_rooms[user_id]
+
         asyncio.create_task(self.broadcast_presence(user_id, False))
 
     async def broadcast_presence(self, user_id: str, online: bool):
         """Broadcast presence change to all connected users who have this user as a contact."""
-        for uid, ws in list(self.active_connections.items()):
+        for uid, ws_list in list(self.active_connections.items()):
             if uid != user_id:
+                for ws in ws_list:
+                    try:
+                        await ws.send_json({
+                            "type": "presence",
+                            "userId": user_id,
+                            "online": online
+                        })
+                    except:
+                        pass
+
+    async def send_personal(self, user_id: str, message: dict):
+        """Send to all websockets of a user (multi-tab delivery)."""
+        if user_id in self.active_connections:
+            for ws in self.active_connections[user_id]:
                 try:
-                    await ws.send_json({
-                        "type": "presence",
-                        "userId": user_id,
-                        "online": online
-                    })
+                    await ws.send_json(message)
                 except:
                     pass
 
-    async def send_personal(self, user_id: str, message: dict):
-        if user_id in self.active_connections:
-            await self.active_connections[user_id].send_json(message)
-
     def is_online(self, user_id: str) -> bool:
-        return user_id in self.active_connections
+        return user_id in self.active_connections and len(self.active_connections[user_id]) > 0
 
     async def join_room(self, user_id: str, room_id: str):
         """User joins a room"""
@@ -70,15 +94,16 @@ class ConnectionManager:
                 del self.user_rooms[user_id]
 
     async def broadcast_to_room(self, room_id: str, message: dict, exclude_user: str = None):
-        """Broadcast message to all room members"""
+        """Broadcast message to all room members who are online (multi-tab aware)."""
         if room_id not in self.room_members:
             return
         for uid in list(self.room_members[room_id]):
             if uid != exclude_user and uid in self.active_connections:
-                try:
-                    await self.active_connections[uid].send_json(message)
-                except:
-                    pass
+                for ws in self.active_connections[uid]:
+                    try:
+                        await ws.send_json(message)
+                    except:
+                        pass
 
     def get_user_rooms(self, user_id: str) -> set:
         """Get all rooms a user is member of"""
