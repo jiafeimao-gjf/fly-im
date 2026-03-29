@@ -155,6 +155,11 @@ onMounted(async () => {
   const userId = authStore.user.id
   const contactId = route.params.userId as string
 
+  // Load contacts (store resets on refresh, needed for header display)
+  if (chatStore.contacts.length === 0) {
+    await chatStore.loadContacts(userId)
+  }
+
   // Load message history
   loadingMessages.value = true
   try {
