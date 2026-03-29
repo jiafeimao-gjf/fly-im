@@ -18,39 +18,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h } from 'vue'
+import { h } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 
 const router = useRouter()
 const route = useRoute()
 
-const tabs = [
-  {
-    name: 'chats',
-    label: 'Chats',
-    icon: ChatIcon,
-  },
-  {
-    name: 'contacts',
-    label: 'Contacts',
-    icon: ContactsIcon,
-  },
-  {
-    name: 'rooms',
-    label: 'Rooms',
-    icon: RoomsIcon,
-  },
-]
-
-function isActive(name: string): boolean {
-  return route.name === name
-}
-
-function navigate(name: string) {
-  router.push({ name })
-}
-
-// Inline SVG icons
+// Inline SVG icons — defined before tabs to avoid TDZ
 const ChatIcon = {
   render() {
     return h('svg', {
@@ -103,5 +77,31 @@ const RoomsIcon = {
       }),
     ])
   },
+}
+
+const tabs = [
+  {
+    name: 'chats',
+    label: 'Chats',
+    icon: ChatIcon,
+  },
+  {
+    name: 'contacts',
+    label: 'Contacts',
+    icon: ContactsIcon,
+  },
+  {
+    name: 'rooms',
+    label: 'Rooms',
+    icon: RoomsIcon,
+  },
+]
+
+function isActive(name: string): boolean {
+  return route.name === name
+}
+
+function navigate(name: string) {
+  router.push({ name })
 }
 </script>

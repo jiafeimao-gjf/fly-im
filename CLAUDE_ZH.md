@@ -45,7 +45,9 @@ npm run build  # 生产构建
 
 **WebSocket (`/ws`)**: 客户端先发送认证 token，然后交换消息。消息类型: `auth`, `auth_ack`, `message`, `ack`, `typing`, `read`, `presence`, `ping`, `pong`。
 
-**连接管理器**: 追踪 `active_connections` (user_id → WebSocket)，用户连接/断开时广播在线状态变化。
+**连接管理器** (`connection.py`): `active_connections` 为 `dict[user_id, list[WebSocket]]` — 支持多 Tab，每个用户的多个 Tab 分别存储。`send_personal()` 向所有 Tab 投递消息。`disconnect(user_id, websocket)` 只移除指定 Tab 的连接。
+
+**心跳**: 服务器每 30s 发一次 `{"type": "ping"}`，客户端必须回 `{"type": "pong"}`。
 
 ### 客户端 (Vue 3 + Pinia)
 
@@ -60,19 +62,22 @@ npm run build  # 生产构建
 - `/room/:roomId` — 全屏聊天室聊天
 
 **状态管理**:
-- `useAuthStore`: 用户会话，localStorage 中的 JWT token，login/register/logout
+- `useAuthStore`: 用户会话，localStorage 中的 JWT token，login/register/logout。`logout()` 同时断开 WebSocket。
 - `useChatStore`: 联系人列表、房间列表、以会话 key (`${userId}-${withUserId}`) 索引的消息、`lastActivity` map 用于会话排序、输入提示、在线状态
 
 **组件** (`src/components/`):
 - `MainLayout.vue` — 底部 Tab 栏壳；挂载时预加载联系人、房间和所有消息历史
 - `TabBar.vue` — 底部导航 (Chats / Contacts / Rooms)
-- `ChatsList.vue` — 合并的 1-on-1 + 聊天室会话列表，按最近消息时间排序
+- `ChatsList.vue` — 合并的 1-on-1 + 聊天室会话列表，按最近消息时间排序；含退出登录按钮
 - `ContactsList.vue` — 好友列表，内联添加联系人表单
 - `RoomsList.vue` — 房间列表，内联创建房间按钮
 - `ConversationItem.vue` — 可复用会话项（头像、名称、预览、时间戳）
 - `CreateRoomModal.vue` — 创建房间弹窗
 
-**WebSocket 服务** (`src/services/wsManager.ts`): 单例 WebSocket 管理器，包含重连逻辑、心跳和各类 WS 消息类型的处理句柄。
+**WebSocket 服务** (`src/services/wsManager.ts`): 全局单例 `WsManager`，所有组件共享。通过 `registerHandler()` / `unregisterHandler()` 注册多 handler。各页面在 `onMounted` 注册自己的 handler，`onUnmounted` 时注销。功能包括：
+  - 收到服务器 `ping` 后自动回 `pong`
+  - 断线时将消息加入队列，重连后清空
+  - Token 过期: `auth_ack { ok: false }` 时跳转到 `/login`
 
 **API 服务** (`src/services/api.ts`): 带有 JWT 拦截器的 Axios 客户端，所有端点前缀为 `/api`。
 
@@ -84,6 +89,7 @@ npm run build  # 生产构建
 - 联系人双向存储（双方都有指向对方的条目）
 - 客户端消息以 `${from_user_id}-${to_user_id}` 为 key 存储以实现去重
 - `useChatStore` 中的 `lastActivity` 追踪每个会话的最后消息时间戳，用于 Chats 列表排序
-- 服务器每 30 秒维护 WebSocket ping/pong 心跳
+- WebSocket ping/pong 心跳：服务器每 30s 发 ping，客户端回 pong
 - 用户上线/下线时向所有已连接用户广播在线状态
 - Tab 导航是无状态的 — 切换 Tab 直接导航到该 Tab 根路径，不会累积历史记录
+- 多 Tab 支持: `connection.py` 按 `list[WebSocket]` 存储每个用户的连接，所有 Tab 都能收到消息；断开时只移除当前 Tab 的连接

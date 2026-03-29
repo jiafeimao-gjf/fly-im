@@ -2,6 +2,7 @@
   <div class="min-h-screen bg-gray-100 flex flex-col">
     <header class="bg-white shadow">
       <div class="flex items-center px-4 py-3">
+        <button @click="router.back()" class="mr-3 text-gray-500 hover:text-gray-700 text-xl">&larr;</button>
         <div>
           <div class="font-bold">{{ contact?.display_name || contact?.username }}</div>
           <div class="text-sm text-gray-500">
@@ -57,6 +58,7 @@
           placeholder="Type a message..."
           class="flex-1 px-4 py-2 border border-gray-300 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-500"
           @input="handleTyping"
+          @keyup.enter="handleSend"
         />
         <button
           type="submit"
@@ -75,7 +77,7 @@ import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
-import { getWsManager, createWsManager, type WsManager } from '@/services/wsManager'
+import { getOrCreateManager, type WsManager } from '@/services/wsManager'
 import type { WSMessage } from '@/types'
 
 const route = useRoute()
@@ -156,55 +158,53 @@ onMounted(async () => {
     loadingMessages.value = false
   }
 
-  // Use global WebSocket Manager
-  let manager = getWsManager()
-
-  if (!manager || manager.getStatus() !== 'connected') {
-    const wsUrl = chatStore.currentWsUrl || `ws://${window.location.host}/ws`
-    manager = createWsManager(
-      { url: wsUrl, token: authStore.token! },
-      {
-        onMessage: (msg: WSMessage) => {
-          if (msg.type === 'message' && msg.from === contactId) {
-            chatStore.addMessage({
-              id: msg.id!,
-              from_user_id: msg.from!,
-              to_user_id: userId,
-              content: msg.content!,
-              timestamp: msg.timestamp!,
-            })
-            scrollToBottom()
-          }
-        },
-        onAuthAck: (result) => {
-          if (!result.ok) {
-            console.error('Auth failed:', result.error)
-          }
-        },
-        onAck: (messageId) => {
-          pendingAcks.value.delete(messageId)
-        },
-        onTyping: (from) => {
-          if (from === contactId) {
-            isTyping.value = true
-            setTimeout(() => {
-              isTyping.value = false
-            }, 3000)
-          }
-        },
-        onPresence: (userId, online) => {
-          chatStore.updateContactPresence(userId, online)
-        },
+  const wsHandlers = {
+    onMessage: (msg: WSMessage) => {
+      if (msg.type === 'message' && msg.from === contactId) {
+        chatStore.addMessage({
+          id: msg.id!,
+          from_user_id: msg.from!,
+          to_user_id: userId,
+          content: msg.content!,
+          timestamp: msg.timestamp!,
+        })
+        scrollToBottom()
       }
-    )
-    manager.connect()
+    },
+    onAuthAck: (result: { ok: boolean; error?: string }) => {
+      if (!result.ok) {
+        console.error('Auth failed:', result.error)
+        router.push('/login')
+      }
+    },
+    onAck: (messageId: string) => {
+      pendingAcks.value.delete(messageId)
+    },
+    onTyping: (from: string) => {
+      if (from === contactId) {
+        isTyping.value = true
+        setTimeout(() => {
+          isTyping.value = false
+        }, 3000)
+      }
+    },
+    onPresence: (uid: string, online: boolean) => {
+      chatStore.updateContactPresence(uid, online)
+    },
+  }
+
+  const manager = getOrCreateManager()
+  manager.registerHandler(wsHandlers)
+
+  if (manager.getStatus() !== 'connected') {
+    const wsUrl = chatStore.currentWsUrl || `ws://${window.location.host}/ws`
+    manager.connect({ url: wsUrl, token: authStore.token! })
   }
 
   wsManager.value = manager
-})
 
-onUnmounted(() => {
-  // Don't disconnect - other pages may be using it
-  wsManager.value = null
+  onUnmounted(() => {
+    manager.unregisterHandler(wsHandlers)
+  })
 })
 </script>

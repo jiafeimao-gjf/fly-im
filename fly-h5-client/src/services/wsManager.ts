@@ -27,25 +27,21 @@ export interface WsManagerHandlers {
 
 class WsManager {
   private ws: WebSocket | null = null
-  private options: WsManagerOptions
-  private handlers: WsManagerHandlers
+  private options: WsManagerOptions | null = null
+  private handlerSets: WsManagerHandlers[] = []
   private status: WsStatus = 'disconnected'
   private reconnectAttempts = 0
   private heartbeatTimer: number | null = null
   private shouldReconnect = true
+  private pendingQueue: object[] = []
 
-  constructor(options: WsManagerOptions, handlers: WsManagerHandlers) {
-    this.options = {
-      reconnectInterval: 3000,
-      maxReconnectAttempts: 10,
-      heartbeatInterval: 30000,
-      ...options,
-    }
-    this.handlers = handlers
-  }
-
-  connect(): void {
+  connect(options: WsManagerOptions): void {
     if (this.ws?.readyState === WebSocket.OPEN) return
+    if (this.options?.token !== options.token) {
+      // Token changed, force reconnect with new credentials
+      this.disconnect(false)
+    }
+    this.options = options
 
     this.setStatus('connecting')
     this.shouldReconnect = true
@@ -63,7 +59,8 @@ class WsManager {
     if (!this.ws) return
 
     this.ws.onopen = () => {
-      this.send({ type: 'auth', token: this.options.token })
+      this.flushQueue()
+      this.send({ type: 'auth', token: this.options!.token })
     }
 
     this.ws.onclose = () => {
@@ -88,84 +85,92 @@ class WsManager {
   }
 
   private dispatchMessage(msg: WSMessage): void {
-    switch (msg.type) {
-      case 'auth_ack':
-        if (msg.ok) {
-          this.setStatus('connected')
-          this.reconnectAttempts = 0
-          this.startHeartbeat()
-          this.handlers.onAuthAck?.({ ok: true, userId: msg.userId })
-        } else {
-          this.setStatus('disconnected')
-          this.handlers.onAuthAck?.({ ok: false, error: msg.error })
-        }
-        break
+    for (const handlers of this.handlerSets) {
+      switch (msg.type) {
+        case 'auth_ack':
+          if (msg.ok) {
+            this.setStatus('connected')
+            this.reconnectAttempts = 0
+            this.startHeartbeat()
+            handlers.onAuthAck?.({ ok: true, userId: msg.userId })
+          } else {
+            this.setStatus('disconnected')
+            handlers.onAuthAck?.({ ok: false, error: msg.error })
+          }
+          break
 
-      case 'pong':
-        break
+        case 'pong':
+          break
 
-      case 'message':
-        this.handlers.onMessage?.(msg)
-        break
+        case 'ping':
+          this.send({ type: 'pong' })
+          break
 
-      case 'room_message':
-        this.handlers.onRoomMessage?.(msg)
-        break
+        case 'message':
+          handlers.onMessage?.(msg)
+          break
 
-      case 'room_member_joined':
-        if (msg.room_id && msg.userId) {
-          this.handlers.onRoomMemberJoined?.(msg.room_id, msg.userId)
-        }
-        break
+        case 'room_message':
+          handlers.onRoomMessage?.(msg)
+          break
 
-      case 'room_member_left':
-        if (msg.room_id && msg.userId) {
-          this.handlers.onRoomMemberLeft?.(msg.room_id, msg.userId)
-        }
-        break
+        case 'room_member_joined':
+          if (msg.room_id && msg.userId) {
+            handlers.onRoomMemberJoined?.(msg.room_id, msg.userId)
+          }
+          break
 
-      case 'room_joined':
-        if (msg.room_id) {
-          this.handlers.onRoomJoined?.(msg.room_id)
-        }
-        break
+        case 'room_member_left':
+          if (msg.room_id && msg.userId) {
+            handlers.onRoomMemberLeft?.(msg.room_id, msg.userId)
+          }
+          break
 
-      case 'room_left':
-        if (msg.room_id) {
-          this.handlers.onRoomLeft?.(msg.room_id)
-        }
-        break
+        case 'room_joined':
+          if (msg.room_id) {
+            handlers.onRoomJoined?.(msg.room_id)
+          }
+          break
 
-      case 'ack':
-        if (msg.id) this.handlers.onAck?.(msg.id)
-        break
+        case 'room_left':
+          if (msg.room_id) {
+            handlers.onRoomLeft?.(msg.room_id)
+          }
+          break
 
-      case 'typing':
-        this.handlers.onTyping?.(msg.from || '', msg.room_id)
-        break
+        case 'ack':
+          if (msg.id) handlers.onAck?.(msg.id)
+          break
 
-      case 'presence':
-        if (msg.userId) this.handlers.onPresence?.(msg.userId, msg.online ?? false)
-        break
+        case 'typing':
+          handlers.onTyping?.(msg.from || '', msg.room_id)
+          break
 
-      case 'error':
-        this.handlers.onError?.(msg.error || 'Unknown error')
-        break
+        case 'presence':
+          if (msg.userId) handlers.onPresence?.(msg.userId, msg.online ?? false)
+          break
 
-      default:
-        this.handlers.onMessage?.(msg)
+        case 'error':
+          handlers.onError?.(msg.error || 'Unknown error')
+          break
+
+        default:
+          handlers.onMessage?.(msg)
+      }
     }
   }
 
   private setStatus(status: WsStatus): void {
     if (this.status !== status) {
       this.status = status
-      this.handlers.onStatusChange?.(status)
+      for (const handlers of this.handlerSets) {
+        handlers.onStatusChange?.(status)
+      }
     }
   }
 
   private scheduleReconnect(): void {
-    if (this.reconnectAttempts >= (this.options.maxReconnectAttempts || 10)) {
+    if (this.reconnectAttempts >= (this.options?.maxReconnectAttempts || 10)) {
       this.setStatus('disconnected')
       return
     }
@@ -174,18 +179,20 @@ class WsManager {
     this.reconnectAttempts++
 
     const delay = Math.min(
-      (this.options.reconnectInterval || 3000) * Math.pow(1.5, this.reconnectAttempts - 1),
+      (this.options?.reconnectInterval || 3000) * Math.pow(1.5, this.reconnectAttempts - 1),
       30000
     )
 
-    setTimeout(() => this.connect(), delay)
+    setTimeout(() => {
+      if (this.options) this.connect(this.options)
+    }, delay)
   }
 
   private startHeartbeat(): void {
     this.stopHeartbeat()
     this.heartbeatTimer = window.setInterval(() => {
       this.send({ type: 'ping' })
-    }, this.options.heartbeatInterval)
+    }, this.options?.heartbeatInterval || 30000)
   }
 
   private stopHeartbeat(): void {
@@ -204,10 +211,32 @@ class WsManager {
     }
   }
 
-  send(message: object): void {
+  private flushQueue(): void {
+    while (this.pendingQueue.length > 0) {
+      const msg = this.pendingQueue.shift()
+      if (msg && this.ws?.readyState === WebSocket.OPEN) {
+        this.ws.send(JSON.stringify(msg))
+      }
+    }
+  }
+
+  private send(message: object): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(message))
+    } else {
+      this.pendingQueue.push(message)
     }
+  }
+
+  // --- Public API ---
+
+  registerHandler(handlers: WsManagerHandlers): void {
+    this.handlerSets.push(handlers)
+  }
+
+  unregisterHandler(handlers: WsManagerHandlers): void {
+    const idx = this.handlerSets.indexOf(handlers)
+    if (idx !== -1) this.handlerSets.splice(idx, 1)
   }
 
   sendMessage(to: string, content: string, id?: string): void {
@@ -250,8 +279,8 @@ class WsManager {
     this.send({ type: 'room_leave', room_id: roomId })
   }
 
-  disconnect(): void {
-    this.shouldReconnect = false
+  disconnect(clearReconnect = true): void {
+    this.shouldReconnect = !clearReconnect
     this.cleanup()
     this.setStatus('disconnected')
   }
@@ -263,11 +292,10 @@ class WsManager {
 
 let wsManagerInstance: WsManager | null = null
 
-export function createWsManager(options: WsManagerOptions, handlers: WsManagerHandlers): WsManager {
-  if (wsManagerInstance) {
-    wsManagerInstance.disconnect()
+export function getOrCreateManager(): WsManager {
+  if (!wsManagerInstance) {
+    wsManagerInstance = new WsManager()
   }
-  wsManagerInstance = new WsManager(options, handlers)
   return wsManagerInstance
 }
 

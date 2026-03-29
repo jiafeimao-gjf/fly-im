@@ -45,7 +45,9 @@ npm run build  # Production build
 
 **WebSocket (`/ws`)**: Client sends auth token first, then exchanges messages. Message types: `auth`, `auth_ack`, `message`, `ack`, `typing`, `read`, `presence`, `ping`, `pong`.
 
-**Connection Manager**: Tracks `active_connections` (user_id → WebSocket) and broadcasts presence changes when users connect/disconnect.
+**Connection Manager** (`connection.py`): `active_connections` is `dict[user_id, list[WebSocket]]` — supports multi-tab by storing all tabs per user. `send_personal()` delivers messages to all tabs. `disconnect(user_id, websocket)` removes only the specified tab's connection.
+
+**Ping Loop**: Server sends `{"type": "ping"}` every 30s; client must respond with `{"type": "pong"}`.
 
 ### Client (Vue 3 + Pinia)
 
@@ -60,19 +62,22 @@ npm run build  # Production build
 - `/room/:roomId` — Full-screen room chat
 
 **State Management**:
-- `useAuthStore`: User session, JWT token in localStorage, login/register/logout
+- `useAuthStore`: User session, JWT token in localStorage, login/register/logout. `logout()` also disconnects the WebSocket.
 - `useChatStore`: Contacts list, rooms list, messages indexed by conversation key (`${userId}-${withUserId}`), `lastActivity` map for conversation recency, typing indicators, presence
 
 **Components** (`src/components/`):
 - `MainLayout.vue` — Shell with bottom tab bar; preloads contacts, rooms, and all message histories on mount
 - `TabBar.vue` — Bottom navigation (Chats / Contacts / Rooms)
-- `ChatsList.vue` — Merged 1-on-1 + room conversation list sorted by last message time
+- `ChatsList.vue` — Merged 1-on-1 + room conversation list sorted by last message time; includes Logout button
 - `ContactsList.vue` — Friends list with inline add contact form
 - `RoomsList.vue` — Room list with inline create room button
 - `ConversationItem.vue` — Reusable chat list item (avatar, name, preview, timestamp)
 - `CreateRoomModal.vue` — Modal overlay for creating rooms
 
-**WebSocket Service** (`src/services/wsManager.ts`): Singleton WebSocket manager with reconnect logic, heartbeat, and typed handlers for all WS message types.
+**WebSocket Service** (`src/services/wsManager.ts`): Singleton `WsManager` shared across all components. Multi-handler registration via `registerHandler()` / `unregisterHandler()`. Each page registers its own handler in `onMounted` and unregisters in `onUnmounted`. Handles:
+  - Auto pong response to server ping
+  - Pending message queue when disconnected (flushed on reconnect)
+  - Token expiry: `auth_ack { ok: false }` redirects to `/login`
 
 **API Service** (`src/services/api.ts`): Axios client with JWT interceptor. All endpoints prefixed with `/api`.
 
@@ -84,6 +89,7 @@ npm run build  # Production build
 - Contacts are stored bidirectionally (both users have entries pointing to each other)
 - Messages are keyed by `${from_user_id}-${to_user_id}` in client state for deduplication
 - `lastActivity` in `useChatStore` tracks per-conversation last message timestamp, used for sorting the Chats list
-- WebSocket ping/pong heartbeat maintained by server every 30 seconds
+- WebSocket ping/pong heartbeat: server sends ping every 30s, client responds with pong
 - Presence broadcasts to all connected users when someone goes online/offline
 - Tab navigation is stateless — switching tabs navigates directly to the tab's root without accumulating history
+- Multi-tab: `connection.py` stores `list[WebSocket]` per user, all tabs receive messages; disconnect removes only the closing tab

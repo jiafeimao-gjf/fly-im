@@ -2,6 +2,7 @@
   <div class="min-h-screen bg-gray-100 flex flex-col">
     <header class="bg-white shadow">
       <div class="flex items-center px-4 py-3">
+        <button @click="router.back()" class="mr-3 text-gray-500 hover:text-gray-700 text-xl">&larr;</button>
         <div>
           <div class="font-bold">{{ room?.name }}</div>
           <div class="text-sm text-gray-500">
@@ -136,6 +137,7 @@
           placeholder="Type a message..."
           class="flex-1 px-4 py-2 border border-gray-300 rounded-full focus:outline-none focus:ring-2 focus:ring-purple-500"
           @input="handleTyping"
+          @keyup.enter="handleSend"
         />
         <button
           type="submit"
@@ -154,7 +156,7 @@ import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
-import { getWsManager, createWsManager, type WsManager } from '@/services/wsManager'
+import { getOrCreateManager, type WsManager } from '@/services/wsManager'
 import type { WSMessage } from '@/types'
 
 const route = useRoute()
@@ -214,6 +216,13 @@ async function handleSend() {
   if (!messageText.value.trim() || !wsManager.value) return
 
   const id = crypto.randomUUID()
+  chatStore.addRoomMessage({
+    id,
+    from_user_id: authStore.user.id,
+    room_id: roomId.value,
+    content: messageText.value,
+    timestamp: Date.now(),
+  })
   pendingAcks.value.add(id)
   wsManager.value.sendRoomMessage(roomId.value, messageText.value, id)
   messageText.value = ''
@@ -260,57 +269,59 @@ onMounted(async () => {
     loadingMessages.value = false
   }
 
-  let manager = getWsManager()
-
-  if (!manager || manager.getStatus() !== 'connected') {
-    const wsUrl = chatStore.currentWsUrl || `ws://${window.location.host}/ws`
-    manager = createWsManager(
-      { url: wsUrl, token: authStore.token! },
-      {
-        onAuthAck: (result) => {
-          if (result.ok) {
-            manager?.joinRoom(roomId.value)
-          }
-        },
-        onRoomMessage: (msg: WSMessage) => {
-          if (msg.room_id === roomId.value && msg.from && msg.content) {
-            chatStore.addRoomMessage({
-              id: msg.id!,
-              from_user_id: msg.from,
-              to_user_id: '',
-              room_id: msg.room_id!,
-              content: msg.content,
-              timestamp: msg.timestamp!,
-            })
-            scrollToBottom()
-          }
-        },
-        onRoomMemberJoined: (rid: string, userId: string) => {
-          if (rid === roomId.value) {
-            chatStore.loadRoomMembers(rid)
-          }
-        },
-        onRoomMemberLeft: (rid: string, userId: string) => {
-          if (rid === roomId.value) {
-            chatStore.updateRoomMemberPresence(rid, userId, false)
-          }
-        },
-        onAck: (messageId) => {
-          pendingAcks.value.delete(messageId)
-        },
+  const wsHandlers = {
+    onAuthAck: (result: { ok: boolean }) => {
+      if (result.ok) {
+        manager.joinRoom(roomId.value)
+      } else {
+        router.push('/login')
       }
-    )
-    manager.connect()
+    },
+    onRoomMessage: (msg: WSMessage) => {
+      if (msg.room_id === roomId.value && msg.from && msg.content) {
+        chatStore.addRoomMessage({
+          id: msg.id!,
+          from_user_id: msg.from,
+          to_user_id: '',
+          room_id: msg.room_id!,
+          content: msg.content,
+          timestamp: msg.timestamp!,
+        })
+        scrollToBottom()
+      }
+    },
+    onRoomMemberJoined: (rid: string, userId: string) => {
+      if (rid === roomId.value) {
+        chatStore.loadRoomMembers(rid)
+      }
+    },
+    onRoomMemberLeft: (rid: string, userId: string) => {
+      if (rid === roomId.value) {
+        chatStore.updateRoomMemberPresence(rid, userId, false)
+      }
+    },
+    onAck: (messageId: string) => {
+      pendingAcks.value.delete(messageId)
+    },
+  }
+
+  const manager = getOrCreateManager()
+  manager.registerHandler(wsHandlers)
+
+  if (manager.getStatus() !== 'connected') {
+    const wsUrl = chatStore.currentWsUrl || `ws://${window.location.host}/ws`
+    manager.connect({ url: wsUrl, token: authStore.token! })
   } else {
     manager.joinRoom(roomId.value)
   }
 
   wsManager.value = manager
-})
 
-onUnmounted(() => {
-  if (wsManager.value) {
-    wsManager.value.leaveRoom(roomId.value)
-  }
+  onUnmounted(() => {
+    if (wsManager.value) {
+      wsManager.value.leaveRoom(roomId.value)
+      wsManager.value.unregisterHandler(wsHandlers)
+    }
+  })
 })
 </script>

@@ -1,8 +1,9 @@
 <template>
   <div class="min-h-screen bg-gray-100">
     <header class="bg-white shadow">
-      <div class="px-4 py-3">
+      <div class="flex items-center justify-between px-4 py-3">
         <h1 class="text-xl font-bold">Chats</h1>
+        <button @click="handleLogout" class="text-sm text-gray-500 hover:text-gray-700">Logout</button>
       </div>
     </header>
 
@@ -29,10 +30,12 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
 import ConversationItem from './ConversationItem.vue'
 
+const router = useRouter()
 const authStore = useAuthStore()
 const chatStore = useChatStore()
 
@@ -95,4 +98,9 @@ const conversations = computed<Conversation[]>(() => {
 
   return convs
 })
+
+function handleLogout() {
+  authStore.logout()
+  router.push('/login')
+}
 </script>

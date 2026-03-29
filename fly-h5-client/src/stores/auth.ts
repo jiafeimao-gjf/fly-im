@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { User } from '@/types'
 import api from '@/services/api'
+import { getWsManager } from '@/services/wsManager'
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null)
@@ -30,6 +31,11 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = null
     localStorage.removeItem('fly_token')
     localStorage.removeItem('fly_user')
+    // Disconnect WebSocket to prevent orphaned connections
+    const manager = getWsManager()
+    if (manager) {
+      manager.disconnect(false)
+    }
   }
 
   function initFromStorage(): void {
