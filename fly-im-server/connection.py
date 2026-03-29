@@ -13,7 +13,7 @@ class ConnectionManager:
         self.user_rooms: dict[str, set[str]] = {}
 
     async def connect(self, user_id: str, websocket: WebSocket):
-        await websocket.accept()
+        # Note: websocket.accept() is already called in websocket.py before manager.connect()
         if user_id not in self.active_connections:
             self.active_connections[user_id] = []
         # Avoid duplicate tabs
@@ -21,7 +21,7 @@ class ConnectionManager:
             self.active_connections[user_id].append(websocket)
         await self.broadcast_presence(user_id, True)
 
-    def disconnect(self, user_id: str, websocket: WebSocket = None):
+    async def disconnect(self, user_id: str, websocket: WebSocket = None):
         """Remove websocket(s) for user. If websocket specified, remove only that one (multi-tab)."""
         if user_id not in self.active_connections:
             return
@@ -40,10 +40,10 @@ class ConnectionManager:
         # Leave all rooms
         if user_id in self.user_rooms:
             for room_id in list(self.user_rooms[user_id]):
-                asyncio.create_task(self.leave_room(user_id, room_id))
+                await self.leave_room(user_id, room_id)
             del self.user_rooms[user_id]
 
-        asyncio.create_task(self.broadcast_presence(user_id, False))
+        await self.broadcast_presence(user_id, False)
 
     async def broadcast_presence(self, user_id: str, online: bool):
         """Broadcast presence change to all connected users who have this user as a contact."""
@@ -65,8 +65,8 @@ class ConnectionManager:
             for ws in self.active_connections[user_id]:
                 try:
                     await ws.send_json(message)
-                except:
-                    pass
+                except Exception as e:
+                    print(f"[WARN] Failed to send to {user_id}: {e}")
 
     def is_online(self, user_id: str) -> bool:
         return user_id in self.active_connections and len(self.active_connections[user_id]) > 0

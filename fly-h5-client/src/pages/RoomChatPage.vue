@@ -1,17 +1,23 @@
 <template>
   <div class="min-h-screen bg-gray-100 flex flex-col">
-    <header class="bg-white shadow">
-      <div class="flex items-center px-4 py-3">
-        <button @click="router.back()" class="mr-3 text-gray-500 hover:text-gray-700 text-xl">&larr;</button>
-        <div>
-          <div class="font-bold">{{ room?.name }}</div>
-          <div class="text-sm text-gray-500">
+    <header class="bg-purple-500 shadow">
+      <div class="flex items-center px-4 py-3 text-white">
+        <button @click="router.back()" class="mr-3 hover:opacity-80 text-xl">&larr;</button>
+        <svg class="w-5 h-5 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+        </svg>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2">
+            <span class="font-bold truncate">{{ room?.name }}</span>
+            <span class="text-xs px-1.5 py-0.5 rounded bg-purple-400">群聊</span>
+          </div>
+          <div class="text-sm text-purple-100">
             {{ memberCount }} members
           </div>
         </div>
         <button
           @click="showMembers = !showMembers"
-          class="ml-auto px-3 py-1 text-sm bg-gray-200 rounded-md hover:bg-gray-300"
+          class="ml-auto px-3 py-1 text-sm bg-purple-400 rounded-md hover:bg-purple-300"
         >
           Members
         </button>

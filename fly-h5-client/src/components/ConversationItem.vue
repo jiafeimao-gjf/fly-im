@@ -19,7 +19,17 @@
     </div>
     <div class="ml-3 flex-1 min-w-0">
       <div class="flex items-center justify-between">
-        <div class="font-medium truncate">{{ title }}</div>
+        <div class="flex items-center gap-1.5">
+          <span class="font-medium truncate">{{ title }}</span>
+          <span
+            v-if="type === 'room'"
+            class="text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-600 flex-shrink-0"
+          >群</span>
+          <span
+            v-else
+            class="text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-600 flex-shrink-0"
+          >私</span>
+        </div>
         <div class="text-xs text-gray-400 ml-2 flex-shrink-0">{{ formattedTime }}</div>
       </div>
       <div class="text-sm text-gray-500 truncate">{{ subtitle }}</div>

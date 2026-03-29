@@ -1,13 +1,19 @@
 <template>
   <div class="min-h-screen bg-gray-100 flex flex-col">
-    <header class="bg-white shadow">
-      <div class="flex items-center px-4 py-3">
-        <button @click="router.back()" class="mr-3 text-gray-500 hover:text-gray-700 text-xl">&larr;</button>
-        <div>
-          <div class="font-bold">{{ contact?.display_name || contact?.username }}</div>
-          <div class="text-sm text-gray-500">
+    <header class="bg-blue-500 shadow">
+      <div class="flex items-center px-4 py-3 text-white">
+        <button @click="router.back()" class="mr-3 hover:opacity-80 text-xl">&larr;</button>
+        <svg class="w-5 h-5 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+        </svg>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2">
+            <span class="font-bold truncate">{{ contact?.display_name || contact?.username }}</span>
+            <span class="text-xs px-1.5 py-0.5 rounded bg-blue-400">私聊</span>
+          </div>
+          <div class="text-sm text-blue-100">
             @{{ contact?.username }}
-            <span v-if="contact?.online" class="text-green-500 ml-1">Online</span>
+            <span v-if="contact?.online" class="text-green-300 ml-1">在线</span>
           </div>
         </div>
       </div>

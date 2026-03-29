@@ -72,16 +72,31 @@ async def websocket_endpoint(websocket: WebSocket):
         # Store connection (now appends for multi-tab support)
         await manager.connect(user_id, websocket)
 
-        # Start ping task
+        # Start ping task with timeout tracking
+        pong_received = True  # True = expect pong, False = waiting
+
         async def ping_loop():
+            nonlocal pong_received
             while True:
                 await asyncio.sleep(config.WS_PING_INTERVAL)
+                if not pong_received:
+                    # Previous ping timed out, disconnect
+                    print(f"[WARN] Pong not received for {user_id}, closing connection")
+                    break
+                pong_received = False
                 try:
                     await websocket.send_json({"type": "ping"})
                 except:
                     break
-
-        ping_task = asyncio.create_task(ping_loop())
+                # Wait for pong with timeout
+                try:
+                    # We check pong_received after timeout seconds via the outer loop
+                    await asyncio.sleep(config.WS_PING_TIMEOUT)
+                    if not pong_received:
+                        print(f"[WARN] Ping timeout for {user_id}")
+                        break
+                except:
+                    break
 
         # Message loop
         while True:
@@ -89,8 +104,8 @@ async def websocket_endpoint(websocket: WebSocket):
             msg = WSMessage(**data)
 
             if msg.type == "pong":
-                # Heartbeat response
-                pass
+                # Heartbeat response - mark received
+                pong_received = True
 
             elif msg.type == "message":
                 # Send message to recipient
@@ -260,4 +275,4 @@ async def websocket_endpoint(websocket: WebSocket):
         if ping_task:
             ping_task.cancel()
         if user_id:
-            manager.disconnect(user_id, websocket)
+            await manager.disconnect(user_id, websocket)
