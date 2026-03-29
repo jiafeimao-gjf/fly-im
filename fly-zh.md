@@ -126,7 +126,7 @@ Fly 频道期望 WebSocket 服务器遵循以下简单协议：
 | 功能              | 状态             |
 | ---------------- | ---------------- |
 | 私信              | ✅ 支持           |
-| 群组              | ❌ 不支持         |
+| 群组（聊天室）      | ✅ 支持           |
 | 媒体              | ❌ 不支持         |
 | 反应              | ❌ 不支持         |
 | 线程              | ❌ 不支持         |
@@ -139,6 +139,7 @@ Fly 频道期望 WebSocket 服务器遵循以下简单协议：
 | 在线状态          | ✅ 支持           |
 | 正在输入提示      | ✅ 支持           |
 | 消息已读回执      | ✅ 支持           |
+| 管理后台接口       | ✅ 支持           |
 
 ## 架构
 
@@ -254,18 +255,23 @@ extensions/fly-channel/
 
 ### 消息类型
 
-| 类型       | 方向           | 描述                     |
-| ---------- | ------------- | ----------------------- |
-| `auth`     | 客户端→服务器   | 认证请求                 |
-| `auth_ack` | 服务器→客户端   | 认证响应                 |
-| `message`  | 双向           | 聊天消息                 |
-| `ping`     | 服务器→客户端   | 心跳请求（30秒间隔）       |
-| `pong`     | 客户端→服务器   | 心跳响应                 |
-| `ack`      | 服务器→客户端   | 消息投递确认             |
-| `read`     | 客户端→服务器   | 消息已读标记             |
-| `typing`   | 双向           | 正在输入提示             |
-| `presence` | 服务器→客户端   | 联系人上线/下线通知       |
-| `error`    | 服务器→客户端   | 错误通知                 |
+| 类型             | 方向           | 描述                     |
+| ---------------- | ------------- | ----------------------- |
+| `auth`           | 客户端→服务器   | 认证请求                 |
+| `auth_ack`       | 服务器→客户端   | 认证响应                 |
+| `message`        | 双向           | 私聊消息                 |
+| `room_message`   | 双向           | 聊天室消息               |
+| `ping`           | 服务器→客户端   | 心跳请求（30秒间隔）       |
+| `pong`           | 客户端→服务器   | 心跳响应                 |
+| `ack`            | 服务器→客户端   | 消息投递确认             |
+| `read`           | 客户端→服务器   | 消息已读标记             |
+| `typing`         | 双向           | 正在输入提示             |
+| `presence`       | 服务器→客户端   | 联系人上线/下线通知       |
+| `room_join`      | 客户端→服务器   | 加入聊天室               |
+| `room_leave`     | 客户端→服务器   | 离开聊天室               |
+| `room_member_joined` | 服务器→客户端 | 成员加入通知             |
+| `room_member_left` | 服务器→客户端 | 成员离开通知             |
+| `error`          | 服务器→客户端   | 错误通知                 |
 
 ### 消息格式
 
@@ -306,6 +312,18 @@ extensions/fly-channel/
 | GET  | `/api/users/{user_id}/contacts`    | 获取用户联系人   |
 | POST | `/api/users/{user_id}/contacts`    | 添加联系人       |
 | GET  | `/api/messages/{user_id}?with={id}&limit=50&before={timestamp}` | 获取消息历史（分页） |
+| GET  | `/api/rooms`                      | 获取我的聊天室列表 |
+| POST | `/api/rooms`                      | 创建聊天室       |
+| GET  | `/api/rooms/{room_id}`            | 获取聊天室详情    |
+| GET  | `/api/rooms/{room_id}/members`    | 获取聊天室成员列表 |
+| POST | `/api/rooms/{room_id}/members`    | 添加聊天室成员    |
+| DELETE | `/api/rooms/{room_id}/members/{user_id}` | 删除聊天室成员 |
+| DELETE | `/api/rooms/{room_id}`            | 删除聊天室（仅创建者）|
+| GET  | `/api/rooms/{room_id}/messages?limit=50&before={timestamp}` | 获取聊天室消息历史 |
+| GET  | `/api/admin/stats`                | 系统统计（用户数、房间数、消息数、在线人数）|
+| GET  | `/api/admin/users?limit=50&offset=0` | 用户列表（分页）|
+| GET  | `/api/admin/rooms?limit=50&offset=0` | 聊天室列表（含成员数，分页）|
+| GET  | `/api/admin/messages/recent?limit=50` | 最近消息 |
 
 #### WebSocket
 
@@ -318,9 +336,12 @@ extensions/fly-channel/
 2. 用户连接时广播 `presence` (online=true) 给所有在线联系人
 3. 用户断开时广播 `presence` (online=false)
 4. 收到 `message` 时：保存消息 → 推送给接收方（如果在线）→ 返回 `ack`
-5. 收到 `read` 时：更新消息的 `read_at` 时间戳
-6. 收到 `typing` 时：转发给接收方（如果在线）
-7. 每 30 秒发送 `ping` 维持连接
+5. 收到 `room_message` 时：验证成员资格 → 保存消息 → 广播给所有在线成员 → 返回 `ack`
+6. 收到 `room_join` 时：验证成员资格 → 加入内存追踪 → 广播加入通知
+7. 收到 `room_leave` 时：移出内存追踪 → 广播离开通知
+8. 收到 `read` 时：更新消息的 `read_at` 时间戳
+9. 收到 `typing` 时：转发给接收方（如果在线）
+10. 每 30 秒发送 `ping` 维持连接
 
 ### 数据库 Schema
 
@@ -350,19 +371,43 @@ CREATE TABLE contacts (
 CREATE TABLE messages (
   id TEXT PRIMARY KEY,
   from_user_id TEXT NOT NULL,
-  to_user_id TEXT NOT NULL,
+  to_user_id TEXT,
+  room_id TEXT,
   content TEXT NOT NULL,
   timestamp INTEGER NOT NULL,
   delivered_at INTEGER,
   read_at INTEGER,
   FOREIGN KEY (from_user_id) REFERENCES users(id),
-  FOREIGN KEY (to_user_id) REFERENCES users(id)
+  FOREIGN KEY (to_user_id) REFERENCES users(id),
+  FOREIGN KEY (room_id) REFERENCES rooms(id)
+);
+
+-- 聊天室表
+CREATE TABLE rooms (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  avatar_url TEXT,
+  created_by TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY (created_by) REFERENCES users(id)
+);
+
+-- 聊天室成员表
+CREATE TABLE room_members (
+  room_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  role TEXT DEFAULT 'member',
+  joined_at INTEGER NOT NULL,
+  PRIMARY KEY (room_id, user_id),
+  FOREIGN KEY (room_id) REFERENCES rooms(id),
+  FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
 -- 索引
 CREATE INDEX idx_messages_from ON messages(from_user_id);
 CREATE INDEX idx_messages_to ON messages(to_user_id);
 CREATE INDEX idx_messages_timestamp ON messages(timestamp);
+CREATE INDEX ix_messages_room_id ON messages(room_id);
 ```
 
 ### 安装与运行
@@ -408,7 +453,9 @@ python main.py  # 运行在 http://localhost:8080
 | -------------- | ------------------- |
 | 登录/注册        | 用户身份验证          |
 | 联系人列表        | 查看和管理联系人       |
-| 聊天            | 实时消息              |
+| 私聊            | 实时私聊消息          |
+| 聊天室列表        | 查看和加入聊天室       |
+| 聊天室聊天        | 实时群聊消息          |
 | 消息历史         | 加载更早的消息        |
 | 在线状态         | 显示在线/离线状态     |
 | 正在输入提示      | 显示联系人正在输入     |
@@ -420,7 +467,8 @@ python main.py  # 运行在 http://localhost:8080
 | `/login`       | LoginPage    | 用户登录        |
 | `/register`    | RegisterPage | 用户注册        |
 | `/`            | HomePage     | 联系人列表       |
-| `/chat/:userId` | ChatPage    | 聊天对话        |
+| `/chat/:userId` | ChatPage    | 私聊对话        |
+| `/room/:roomId` | RoomChatPage | 聊天室对话      |
 
 ### API 服务
 
