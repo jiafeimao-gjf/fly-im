@@ -232,7 +232,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 }
                 for member in room_members:
                     if member.user_id != user_id and member.user_id in manager.active_connections:
-                        await manager.active_connections[member.user_id].send_json(broadcast_msg)
+                        await manager.send_personal(member.user_id, broadcast_msg)
 
                 # Send ack to sender
                 await websocket.send_json({

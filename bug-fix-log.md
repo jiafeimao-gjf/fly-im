@@ -4,7 +4,7 @@
 
 ---
 
-## 2026-03-29
+## 2026-03-30
 
 ### 1. 数据库 `messages` 表缺少 `room_id` 列
 
@@ -186,12 +186,39 @@
 
 ---
 
+### 14. `disconnect` 多 tab 环境下误报离线
+
+**严重程度：高**
+
+**现象：** 用户开多个 tab，只断开一个 tab，却被广播为离线，其他在线 tab 收不到消息。
+
+**原因：** `disconnect` 在删除一个 tab 的 WebSocket 后，总是执行 `broadcast_presence(user_id, False)`。但 `active_connections` 已改为 `dict[str, list[WebSocket]]` 支持多 tab，只有所有 tab 都断开才应广播离线。
+
+**修复：** 记录断开前是否为唯一连接，只有 `was_single_connection == True` 时才广播 `offline` 和清理房间状态。
+
+**文件：** `fly-im-server/connection.py`
+
+---
+
+### 15. `room_message` 广播直接调用列表的 `send_json`
+
+**严重程度：高**
+
+**现象：** 聊天室消息发送后，部分在线成员收不到推送，消息静默丢失。
+
+**原因：** `active_connections` 已改为 `dict[str, list[WebSocket]]`，但 `room_message` 广播代码仍直接调用 `manager.active_connections[member.user_id].send_json()`，`list` 没有 `send_json` 方法，静默失败。
+
+**修复：** 改用 `manager.send_personal(member.user_id, broadcast_msg)`，它内部已正确遍历列表推送所有 tab。
+
+**文件：** `fly-im-server/websocket.py`
+
+---
+
 ## 未解决问题（待处理）
 
 | 问题 | 严重程度 | 说明 |
 |------|---------|------|
 | SQLite 并发写入 `database is locked` | 高 | 建议切换 PostgreSQL/MySQL |
-| Admin API 初期无授权 | 高 | 已通过 `get_admin_user_id` 修复授权 |
-| 多设备同时在线同一用户只保留最后连接 | 中 | `active_connections` 已支持 list，但多 tab 时行为需验证 |
 | 消息无序列号，可能乱序 | 中 | 建议服务端生成递增序列号 |
 | 离线消息无主动推送 | 中 | 用户上线后需手动拉取历史 |
+| 聊天室广播依赖内存状态 | 中 | `room_member_joined/left` 仍用 `broadcast_to_room`（内存），与消息推送（DB）不一致 |
