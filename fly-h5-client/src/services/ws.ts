@@ -1,4 +1,5 @@
 import type { WSMessage } from '@/types'
+import { uuid } from '@/utils/uuid'
 
 export interface WsHandlers {
   onOpen: () => void
@@ -74,7 +75,7 @@ export function createWebSocket(token: string, wsUrl: string, handlers: WsHandle
 export function sendMessage(ws: WebSocket, to: string, content: string, id?: string): void {
   const msg: WSMessage = {
     type: 'message',
-    id: id || crypto.randomUUID(),
+    id: id || uuid(),
     to,
     content,
     timestamp: Date.now(),

@@ -163,6 +163,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
 import { getOrCreateManager, type WsManager } from '@/services/wsManager'
+import { uuid } from '@/utils/uuid'
 import type { WSMessage } from '@/types'
 
 const route = useRoute()
@@ -221,7 +222,7 @@ function handleTyping() {
 async function handleSend() {
   if (!messageText.value.trim() || !wsManager.value) return
 
-  const id = crypto.randomUUID()
+  const id = uuid()
   chatStore.addRoomMessage({
     id,
     from_user_id: authStore.user!.id,

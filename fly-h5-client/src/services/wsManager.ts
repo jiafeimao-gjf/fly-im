@@ -1,4 +1,5 @@
 import type { WSMessage } from '@/types'
+import { uuid } from '@/utils/uuid'
 
 export type WsStatus = 'connecting' | 'connected' | 'disconnected' | 'reconnecting'
 
@@ -263,7 +264,7 @@ class WsManager {
   sendMessage(to: string, content: string, id?: string): void {
     const msg = {
       type: 'message',
-      id: id || crypto.randomUUID(),
+      id: id || uuid(),
       to,
       content,
       timestamp: Date.now(),
@@ -279,7 +280,7 @@ class WsManager {
   sendRoomMessage(roomId: string, content: string, id?: string): void {
     const msg = {
       type: 'room_message',
-      id: id || crypto.randomUUID(),
+      id: id || uuid(),
       room_id: roomId,
       content,
       timestamp: Date.now(),
