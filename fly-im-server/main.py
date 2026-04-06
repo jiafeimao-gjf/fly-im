@@ -2,6 +2,8 @@
 Fly IM Server - FastAPI WebSocket IM Server
 A simple IM server for the Fly channel plugin.
 """
+import logging
+import sys
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,6 +12,14 @@ from database import init_db
 from connection import manager
 from routes import auth_router, users_router, messages_router, rooms_router, admin_router
 from websocket import router as ws_router
+
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
 
 # Initialize database
 init_db()
@@ -43,4 +53,4 @@ def health_check():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    uvicorn.run(app, host="172.20.10.2", port=8080)

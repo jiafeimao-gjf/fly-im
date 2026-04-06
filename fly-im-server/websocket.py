@@ -1,5 +1,6 @@
 """WebSocket endpoint"""
 import asyncio
+import logging
 import uuid
 import time
 from typing import Optional
@@ -14,6 +15,7 @@ from connection import manager
 import config
 
 router = APIRouter(tags=["websocket"])
+logger = logging.getLogger(__name__)
 
 
 @router.websocket("/ws")
@@ -26,9 +28,27 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         # Wait for auth message
         auth_data = await websocket.receive_json()
+        logger.debug(f"Received auth data: {auth_data}")
         token = auth_data.get("token")
 
-        if not token:
+        # Debug mode: skip token validation if DEBUG_MODE is enabled
+        if config.DEBUG_MODE and not token:
+            logger.debug("Debug mode enabled, skipping token validation")
+            user_id = "jiafei1"
+            user_id = auth_data.get("user_id")
+            if not user_id:
+                logger.warning("Debug mode: user_id not provided")
+                await websocket.send_json({
+                    "type": "auth_ack",
+                    "ok": False,
+                    "error": "user_id required in debug mode"
+                })
+                await websocket.close()
+                return
+            # Skip db user lookup in debug mode
+            db = None
+            logger.info(f"Debug mode: accepted connection for user_id={user_id}")
+        elif not token:
             await websocket.send_json({
                 "type": "auth_ack",
                 "ok": False,
@@ -36,31 +56,31 @@ async def websocket_endpoint(websocket: WebSocket):
             })
             await websocket.close()
             return
+        else:
+            # Validate token
+            user_id = decode_token(token)
+            if not user_id:
+                await websocket.send_json({
+                    "type": "auth_ack",
+                    "ok": False,
+                    "error": "Invalid token"
+                })
+                await websocket.close()
+                return
 
-        # Validate token
-        user_id = decode_token(token)
-        if not user_id:
-            await websocket.send_json({
-                "type": "auth_ack",
-                "ok": False,
-                "error": "Invalid token"
-            })
-            await websocket.close()
-            return
+            # Verify user exists
+            db = SessionLocal()
+            user = db.query(User).filter(User.id == user_id).first()
+            db.close()
 
-        # Verify user exists
-        db = SessionLocal()
-        user = db.query(User).filter(User.id == user_id).first()
-        db.close()
-
-        if not user:
-            await websocket.send_json({
-                "type": "auth_ack",
-                "ok": False,
-                "error": "User not found"
-            })
-            await websocket.close()
-            return
+            if not user:
+                await websocket.send_json({
+                    "type": "auth_ack",
+                    "ok": False,
+                    "error": "User not found"
+                })
+                await websocket.close()
+                return
 
         # Send auth ack
         await websocket.send_json({
@@ -68,21 +88,23 @@ async def websocket_endpoint(websocket: WebSocket):
             "ok": True,
             "userId": user_id
         })
+        logger.info(f"User {user_id} authenticated successfully")
 
         # Store connection (now appends for multi-tab support)
         await manager.connect(user_id, websocket)
+        logger.debug(f"User {user_id} connected, total tabs: {len(manager.active_connections.get(user_id, []))}")
 
-        # Push contact online statuses to newly connected user
-        db = SessionLocal()
-        contacts = db.query(Contact).filter(Contact.user_id == user_id).all()
-        for contact in contacts:
-            online = contact.contact_id in manager.active_connections
-            await websocket.send_json({
-                "type": "presence",
-                "userId": contact.contact_id,
-                "online": online
-            })
-        db.close()
+        # Push contact online statuses to newly connected user (skip in debug mode without db)
+        if db is not None:
+            contacts = db.query(Contact).filter(Contact.user_id == user_id).all()
+            for contact in contacts:
+                online = contact.contact_id in manager.active_connections
+                await websocket.send_json({
+                    "type": "presence",
+                    "userId": contact.contact_id,
+                    "online": online
+                })
+            db.close()
 
         # Start ping task with timeout tracking
         pong_received = True  # True = expect pong, False = waiting
@@ -93,7 +115,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 await asyncio.sleep(config.WS_PING_INTERVAL)
                 if not pong_received:
                     # Previous ping timed out, disconnect
-                    print(f"[WARN] Pong not received for {user_id}, closing connection")
+                    logger.warning(f"Pong not received for {user_id}, closing connection")
                     break
                 pong_received = False
                 try:
@@ -105,7 +127,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     # We check pong_received after timeout seconds via the outer loop
                     await asyncio.sleep(config.WS_PING_TIMEOUT)
                     if not pong_received:
-                        print(f"[WARN] Ping timeout for {user_id}")
+                        logger.warning(f"Ping timeout for {user_id}")
                         break
                 except:
                     break
@@ -114,6 +136,7 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             data = await websocket.receive_json()
             msg = WSMessage(**data)
+            logger.debug(f"Received message from {user_id}: type={msg.type}")
 
             if msg.type == "pong":
                 # Heartbeat response - mark received
@@ -127,6 +150,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 # Send message to recipient
                 msg_id = msg.id or str(uuid.uuid4())
                 timestamp = msg.timestamp or int(time.time() * 1000)
+                logger.info(f"Message from {user_id} to {msg.to}: {msg.content[:50] if msg.content else ''}...")
 
                 # Save to database
                 db = SessionLocal()
@@ -151,6 +175,9 @@ async def websocket_endpoint(websocket: WebSocket):
                         "content": msg.content,
                         "timestamp": timestamp,
                     })
+                    logger.debug(f"Message {msg_id} delivered to {msg.to}")
+                else:
+                    logger.debug(f"Message {msg_id} saved but recipient {msg.to} offline")
 
                 # Send ack to sender
                 await websocket.send_json({
@@ -167,6 +194,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     if message and message.to_user_id == user_id:
                         message.read_at = int(time.time() * 1000)
                         db.commit()
+                        logger.debug(f"Message {msg.id} marked as read by {user_id}")
                     db.close()
 
             elif msg.type == "typing":
@@ -178,6 +206,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         "to": msg.to,
                         "room_id": msg.room_id,
                     })
+                    logger.debug(f"Typing from {user_id} to {msg.to}")
 
             elif msg.type == "room_message":
                 # Send message to room
@@ -191,6 +220,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
                 msg_id = msg.id or str(uuid.uuid4())
                 timestamp = msg.timestamp or int(time.time() * 1000)
+                logger.info(f"Room message from {user_id} to room {msg.room_id}: {msg.content[:50] if msg.content else ''}...")
 
                 # Verify membership
                 db = SessionLocal()
@@ -233,6 +263,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 for member in room_members:
                     if member.user_id != user_id and member.user_id in manager.active_connections:
                         await manager.send_personal(member.user_id, broadcast_msg)
+                logger.debug(f"Room message {msg_id} broadcast to {len(room_members)} members")
 
                 # Send ack to sender
                 await websocket.send_json({
@@ -260,6 +291,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         "room_id": msg.room_id,
                         "userId": user_id,
                     })
+                    logger.info(f"User {user_id} joined room {msg.room_id}")
                     await websocket.send_json({
                         "type": "room_joined",
                         "room_id": msg.room_id,
@@ -277,6 +309,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     "room_id": msg.room_id,
                     "userId": user_id,
                 })
+                logger.info(f"User {user_id} left room {msg.room_id}")
                 await websocket.send_json({
                     "type": "room_left",
                     "room_id": msg.room_id,
@@ -284,11 +317,12 @@ async def websocket_endpoint(websocket: WebSocket):
                 })
 
     except WebSocketDisconnect:
-        pass
+        logger.info(f"User {user_id} disconnected")
     except Exception as e:
-        print(f"WebSocket error: {e}")
+        logger.error(f"WebSocket error for user {user_id}: {e}")
     finally:
         if ping_task:
             ping_task.cancel()
         if user_id:
             await manager.disconnect(user_id, websocket)
+            logger.info(f"User {user_id} disconnected, remaining connections: {len(manager.active_connections.get(user_id, []))}")
